@@ -1,17 +1,20 @@
 
 from io import BytesIO
 import base64
+from pathlib import Path
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from PIL import Image, UnidentifiedImageError
 from ultralytics import YOLO
 
+
 app = FastAPI(
     title="DebriScan Detection API",
     description="Image analysis API for water-body debris monitoring.",
-    version="0.1.0",
+    version="0.2.0",
 )
+
 
 app.add_middleware(
     CORSMiddleware,
@@ -24,12 +27,22 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# General-purpose pretrained model.
-# This is a baseline, not a debris-specific trained model.
-model = YOLO("yolo11n.pt")
+
+# Load the custom-trained DebriScan floating-waste model.
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+MODEL_PATH = PROJECT_ROOT / "models" / "best.pt"
+
+if not MODEL_PATH.is_file():
+    raise FileNotFoundError(
+        f"DebriScan model weights not found: {MODEL_PATH}"
+    )
+
+model = YOLO(str(MODEL_PATH))
+
 
 MAX_IMAGE_BYTES = 10 * 1024 * 1024
 ALLOWED_FORMATS = {"JPEG", "PNG", "WEBP"}
+CONFIDENCE_THRESHOLD = 0.25
 
 
 @app.get("/")
@@ -37,8 +50,8 @@ def home():
     return {
         "project": "DebriScan",
         "status": "online",
-        "model": "YOLO11n pretrained baseline",
-        "purpose": "Water-body image analysis",
+        "model": "DebriScan custom YOLOv8n floating-waste model",
+        "purpose": "Water-body floating-waste detection",
     }
 
 
@@ -47,7 +60,7 @@ def health():
     return {
         "api": "online",
         "model_loaded": model is not None,
-        "mode": "baseline",
+        "mode": "floating_waste_detection",
     }
 
 
@@ -66,7 +79,10 @@ async def detect_debris(file: UploadFile = File(...)):
     image_bytes = await file.read(MAX_IMAGE_BYTES + 1)
 
     if not image_bytes:
-        raise HTTPException(status_code=400, detail="The image is empty.")
+        raise HTTPException(
+            status_code=400,
+            detail="The image is empty.",
+        )
 
     if len(image_bytes) > MAX_IMAGE_BYTES:
         raise HTTPException(
@@ -97,7 +113,7 @@ async def detect_debris(file: UploadFile = File(...)):
     try:
         results = model.predict(
             source=image,
-            conf=0.10,
+            conf=CONFIDENCE_THRESHOLD,
             imgsz=640,
             verbose=False,
         )
@@ -109,6 +125,7 @@ async def detect_debris(file: UploadFile = File(...)):
             for box in result.boxes:
                 class_id = int(box.cls.item())
                 confidence = float(box.conf.item())
+
                 x1, y1, x2, y2 = [
                     round(float(value), 2)
                     for value in box.xyxy[0].tolist()
@@ -125,14 +142,18 @@ async def detect_debris(file: UploadFile = File(...)):
                     },
                 })
 
-        # Annotated preview with model-generated bounding boxes.
+        # Generate an annotated image with bounding boxes.
         annotated = result.plot()
         annotated_image = Image.fromarray(
             annotated[:, :, ::-1]
         )
 
         buffer = BytesIO()
-        annotated_image.save(buffer, format="JPEG", quality=85)
+        annotated_image.save(
+            buffer,
+            format="JPEG",
+            quality=85,
+        )
 
         preview = base64.b64encode(
             buffer.getvalue()
@@ -145,11 +166,12 @@ async def detect_debris(file: UploadFile = File(...)):
             "detection_count": len(detections),
             "detections": detections,
             "annotated_image": f"data:image/jpeg;base64,{preview}",
-            "model": "YOLO11n pretrained baseline",
-            "mode": "general_object_detection",
+            "model": "DebriScan custom YOLOv8n floating-waste model",
+            "mode": "floating_waste_detection",
             "warning": (
-                "This general-purpose model is not specifically trained "
-                "to detect all water debris. Results require validation."
+                "This model was trained on a floating-waste dataset. "
+                "Detection performance may vary with water conditions, "
+                "lighting, camera angle, and waste appearance."
             ),
         }
 
