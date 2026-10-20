@@ -1,0 +1,27 @@
+# Python cache and virtual environments
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Trained model weights
+models/
+*.pt
+
+# Dataset files
+train/
+valid/
+test/
+data.yaml
+README.dataset.txt
+README.roboflow.txt
+
+# Backup files
+*.bak
+
+# Frontend dependencies and build output
+node_modules/
+dist/
+
+# Environment secrets
+.env
